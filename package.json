@@ -8,6 +8,7 @@
     "chrome-release-build": "node scripts/release-build.js chrome"
   },
   "devDependencies": {
+    "@types/chrome": "^0.0.266",
     "@eslint/compat": "^1.0.3",
     "@eslint/js": "^9.4.0",
     "eslint": "^9.4.0",

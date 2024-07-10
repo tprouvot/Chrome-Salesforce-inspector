@@ -3,6 +3,8 @@ import {sfConn, apiVersion, sessionError} from "./inspector.js";
 import {getAllFieldSetupLinks} from "./setup-links.js";
 import {setupLinks} from "./links.js";
 
+var p = parent;
+
 let h = React.createElement;
 if (typeof browser === "undefined") {
   var browser = chrome;
@@ -535,7 +537,8 @@ class AllDataBox extends React.PureComponent {
     function getObjects(url, api) {
       return sfConn.rest(url).then(describe => {
         for (let sobject of describe.sobjects) {
-          addEntity(sobject, api);
+          // Bugfix for when the describe call returns before the tooling query call, and isCustomSetting is undefined
+          addEntity({...sobject, isCustomSetting: sobject.customSetting}, api);
         }
       }).catch(err => {
         console.error("list " + api + " sobjects", err);
@@ -1031,6 +1034,7 @@ class AllDataBoxShortcut extends React.PureComponent {
         element.detail = element.section;
         element.name = element.link;
         element.Id = element.name;
+        element.isSetupLink = true;
       });
 
       let metadataShortcutSearch = localStorage.getItem("metadataShortcutSearch");
@@ -1155,7 +1159,15 @@ class AllDataBoxShortcut extends React.PureComponent {
 
     return (
       h("div", {ref: "shortcutsBox", className: "users-box"},
-        h(AllDataSearch, {ref: "allDataSearch", getMatches: this.getMatches, onDataSelect: this.onDataSelect, inputSearchDelay: 200, placeholderText: "Quick find links, shortcuts", resultRender: this.resultRender}),
+        h(AllDataSearch, {
+          ref: "allDataSearch",
+          getMatches: this.getMatches,
+          onDataSelect: this.onDataSelect,
+          inputSearchDelay: 200,
+          placeholderText: "Quick find links, shortcuts",
+          resultRender: this.resultRender,
+          sfHost
+        }),
         h("div", {className: "all-data-box-inner" + (!selectedUser ? " empty" : "")},
           selectedUser
             ? h(UserDetails, {user: selectedUser, sfHost, contextOrgId, currentUserId: contextUserId, linkTarget, contextPath})
@@ -1227,7 +1239,12 @@ class AllDataBoxOrg extends React.PureComponent {
             h("table", {},
               h("tbody", {},
                 h("tr", {},
-                  h("th", {}, h("a", {href: "https://" + sfHost + "/lightning/setup/CompanyProfileInfo/home", title: "Company Information", target: linkTarget}, "Org Id:")),
+                  h("th", {}, h("a", {
+                    href: URLBuilder.getCompanyInfoUrl(sfHost),
+                    title: "Company Information",
+                    target: linkTarget,
+                    onClick: handleLightningLinkClick
+                  }, "Org Id:")),
                   h("td", {}, orgInfo.Id.substring(0, 15))
                 ),
                 h("tr", {},
@@ -1457,7 +1474,12 @@ class UserDetails extends React.PureComponent {
                 h("td", {className: "oneliner"},
                   (user.IsActive) ? "" : h("span", {title: "User is inactive"}, "⚠ "),
                   //user.Name + " (" + user.Alias + ")"
-                  h("a", {href: this.getUserSummaryLink(user.Id), target: linkTarget, title: "View summary"}, user.Name)
+                  h("a", {
+                    href: this.getUserSummaryLink(user.Id),
+                    target: linkTarget,
+                    title: "View summary",
+                    onClick: handleLightningLinkClick
+                  }, user.Name)
                   ,
                   " (" + user.Alias + ")"
                 )
@@ -1479,7 +1501,11 @@ class UserDetails extends React.PureComponent {
                 h("th", {}, "Profile:"),
                 h("td", {className: "oneliner"},
                   (user.Profile)
-                    ? h("a", {href: this.getProfileLink(user.ProfileId), target: linkTarget}, user.Profile.Name)
+                    ? h("a", {
+                      href: this.getProfileLink(user.ProfileId),
+                      target: linkTarget,
+                      onClick: handleLightningLinkClick
+                    }, user.Profile.Name)
                     : h("em", {className: "inactive"}, "unknown")
                 )
               ),
@@ -1498,9 +1524,26 @@ class UserDetails extends React.PureComponent {
             )
           )),
         h("div", {ref: "userButtons", className: "user-buttons center small-font"},
-          h("a", {href: this.getUserDetailLink(user.Id), target: linkTarget, className: "slds-button slds-button_neutral"}, "Details"),
-          h("a", {href: this.getUserPsetLink(user.Id), target: linkTarget, className: "slds-button slds-button_neutral", title: "Show / assign user's permission sets"}, "PSet"),
-          h("a", {href: this.getUserPsetGroupLink(user.Id), target: linkTarget, className: "slds-button slds-button_neutral", title: "Show / assign user's permission set groups"}, "PSetG"),
+          h("a", {
+            href: this.getUserDetailLink(user.Id),
+            target: linkTarget,
+            className: "slds-button slds-button_neutral",
+            onClick: handleLightningLinkClick
+          }, "Details"),
+          h("a", {
+            href: this.getUserPsetLink(user.Id),
+            target: linkTarget,
+            className: "slds-button slds-button_neutral",
+            title: "Show / assign user's permission sets",
+            onClick: handleLightningLinkClick
+          }, "PSet"),
+          h("a", {
+            href: this.getUserPsetGroupLink(user.Id),
+            target: linkTarget,
+            className: "slds-button slds-button_neutral",
+            title: "Show / assign user's permission set groups",
+            onClick: handleLightningLinkClick
+          }, "PSetG"),
           h("a", {href: "#", id: "enableDebugLog", disabled: false, onClick: this.enableDebugLog, className: "slds-button slds-button_neutral", title: "Enable user debug log"}, "Enable Logs")
         ),
         this.doSupportLoginAs(user) ? h("div", {className: "user-buttons justify-center small-font slds-button-group top-space", role: "group"},
@@ -1645,44 +1688,40 @@ class AllDataSelection extends React.PureComponent {
    */
   getObjectSetupLink(sobjectName, durableId, isCustomSetting) {
     if (sobjectName.endsWith("__mdt")) {
-      return this.getCustomMetadataLink(durableId);
+      return URLBuilder.getCustomMetadataSetupUrl(this.props.sfHost, durableId);
     } else if (isCustomSetting) {
-      return "https://" + this.props.sfHost + "/lightning/setup/CustomSettings/page?address=%2F" + durableId + "?setupid=CustomSettings";
-    } else if (sobjectName.endsWith("__c")) {
-      return "https://" + this.props.sfHost + "/lightning/setup/ObjectManager/" + durableId + "/Details/view";
+      return URLBuilder.getCustomSettingSetupUrl(this.props.sfHost, durableId);
+    } else if (sobjectName.endsWith("__c") || sobjectName.endsWith("__kav")) {
+      return URLBuilder.getObjectSetupUrl(this.props.sfHost, durableId);
     } else {
-      return "https://" + this.props.sfHost + "/lightning/setup/ObjectManager/" + sobjectName + "/Details/view";
+      return URLBuilder.getObjectSetupUrl(this.props.sfHost, sobjectName);
     }
-  }
-  getCustomMetadataLink(durableId) {
-    return "https://" + this.props.sfHost + "/lightning/setup/CustomMetadata/page?address=%2F" + durableId + "%3Fsetupid%3DCustomMetadata";
   }
   getObjectFieldsSetupLink(sobjectName, durableId, isCustomSetting) {
     if (sobjectName.endsWith("__mdt")) {
-      return this.getCustomMetadataLink(durableId);
+      return URLBuilder.getCustomMetadataSetupUrl(this.props.sfHost, durableId);
     } else if (isCustomSetting) {
-      return "https://" + this.props.sfHost + "/lightning/setup/CustomSettings/page?address=%2F" + durableId + "?setupid=CustomSettings";
+      return URLBuilder.getCustomSettingSetupUrl(this.props.sfHost, durableId);
     } else if (sobjectName.endsWith("__c") || sobjectName.endsWith("__kav")) {
-      return "https://" + this.props.sfHost + "/lightning/setup/ObjectManager/" + durableId + "/FieldsAndRelationships/view";
+      return URLBuilder.getObjectFieldsSetupUrl(this.props.sfHost, durableId);
     } else {
-      return "https://" + this.props.sfHost + "/lightning/setup/ObjectManager/" + sobjectName + "/FieldsAndRelationships/view";
+      return URLBuilder.getObjectFieldsSetupUrl(this.props.sfHost, sobjectName);
     }
   }
   getObjectListLink(sobjectName, keyPrefix, isCustomSetting) {
     if (sobjectName.endsWith("__mdt")) {
-      return "https://" + this.props.sfHost + "/lightning/setup/CustomMetadata/page?address=%2F" + keyPrefix;
+      return URLBuilder.getCustomeMetadataListUrl(this.props.sfHost, keyPrefix);
     } else if (isCustomSetting) {
-      return "https://" + this.props.sfHost + "/lightning/setup/CustomSettings/page?address=%2Fsetup%2Fui%2FlistCustomSettingsData.apexp?id=" + keyPrefix;
-
+      return URLBuilder.getCustomSettingListUrl(this.props.sfHost, keyPrefix);
     } else {
-      return "https://" + this.props.sfHost + "/lightning/o/" + sobjectName + "/list";
+      return URLBuilder.getObjectListUrl(this.props.sfHost, sobjectName);
     }
   }
   getRecordTypesLink(sfHost, sobjectName, durableId) {
     if (sobjectName.endsWith("__c") || sobjectName.endsWith("__kav")) {
-      return "https://" + sfHost + "/lightning/setup/ObjectManager/" + durableId + "/RecordTypes/view";
+      return URLBuilder.getObjectRecordTypesUrl(sfHost, durableId);
     } else {
-      return "https://" + sfHost + "/lightning/setup/ObjectManager/" + sobjectName + "/RecordTypes/view";
+      return URLBuilder.getObjectRecordTypesUrl(sfHost, sobjectName);
     }
   }
   getObjectDocLink(sobject, api){
@@ -1692,7 +1731,8 @@ class AllDataSelection extends React.PureComponent {
     return "https://developer.salesforce.com/docs/atlas.en-us.object_reference.meta/object_reference/sforce_api_objects_" + sobject.name.toLowerCase() + ".htm";
   }
   getNewObjectUrl(sfHost, newUrl){
-    return "https://" + sfHost + newUrl;
+    // TODO add support for creating new custom settings
+    return URLBuilder.getNewObjectUrl(sfHost, newUrl);
   }
   setFlowDefinitionId(recordId){
     if (recordId && !this.state.flowDefinitionId){
@@ -1726,17 +1766,34 @@ class AllDataSelection extends React.PureComponent {
               h("tr", {},
                 h("th", {}, "Name:"),
                 h("td", {},
-                  h("a", {href: this.getObjectSetupLink(selectedValue.sobject.name, selectedValue.sobject.durableId, selectedValue.sobject.isCustomSetting), target: linkTarget}, selectedValue.sobject.name)
+                  h("a", {
+                    href: this.getObjectSetupLink(selectedValue.sobject.name, selectedValue.sobject.durableId, selectedValue.sobject.isCustomSetting),
+                    target: linkTarget,
+                    onClick: handleLightningLinkClick
+                  }, selectedValue.sobject.name)
                 )
               ),
               h("tr", {},
                 h("th", {}, "Links:"),
                 h("td", {},
-                  h("a", {href: this.getObjectFieldsSetupLink(selectedValue.sobject.name, selectedValue.sobject.durableId, selectedValue.sobject.isCustomSetting), target: linkTarget}, "Fields"),
+                  h("a", {
+                    href: this.getObjectFieldsSetupLink(selectedValue.sobject.name, selectedValue.sobject.durableId, selectedValue.sobject.isCustomSetting),
+                    target: linkTarget,
+                    onClick: handleLightningLinkClick
+                  }, "Fields"),
                   h("span", {}, " / "),
-                  h("a", {href: this.getRecordTypesLink(sfHost, selectedValue.sobject.name, selectedValue.sobject.durableId), target: linkTarget}, "Record Types"),
+                  h("a", {
+                    // TODO add check for record type support (such as custom metadata types and custom settings)
+                    href: this.getRecordTypesLink(sfHost, selectedValue.sobject.name, selectedValue.sobject.durableId),
+                    target: linkTarget,
+                    onClick: handleLightningLinkClick
+                  }, "Record Types"),
                   h("span", {}, " / "),
-                  h("a", {href: this.getObjectListLink(selectedValue.sobject.name, selectedValue.sobject.keyPrefix, selectedValue.sobject.isCustomSetting), target: linkTarget}, "Object List")
+                  h("a", {
+                    href: this.getObjectListLink(selectedValue.sobject.name, selectedValue.sobject.keyPrefix, selectedValue.sobject.isCustomSetting),
+                    target: linkTarget,
+                    onClick: handleLightningLinkClick
+                  }, "Object List")
                 ),
               ),
               h("tr", {},
@@ -1784,7 +1841,13 @@ class AllDataSelection extends React.PureComponent {
           : " (Not readable)"
         ))),
         isFieldsPresent ? h("a", {ref: "showFieldApiNameBtn", onClick: showApiName, target: linkTarget, className: "slds-m-top_xx-small page-button slds-button slds-button_neutral"}, h("span", {}, "Show ", h("u", {}, "f"), "ields API names")) : null,
-        selectedValue.sobject.isEverCreatable ? h("a", {ref: "showNewBtn", href: this.getNewObjectUrl(sfHost, selectedValue.sobject.newUrl), target: linkTarget, className: "slds-m-top_xx-small page-button slds-button slds-button_neutral"}, h("span", {}, h("u", {}, "N"), "ew " + selectedValue.sobject.label)) : null,
+        selectedValue.sobject.isEverCreatable ? h("a", {
+          ref: "showNewBtn",
+          href: this.getNewObjectUrl(sfHost, selectedValue.sobject.newUrl),
+          target: linkTarget,
+          onClick: handleLightningLinkClick,
+          className: "slds-m-top_xx-small page-button slds-button slds-button_neutral"
+        }, h("span", {}, h("u", {}, "N"), "ew " + selectedValue.sobject.label)) : null,
       )
     );
   }
@@ -1793,10 +1856,22 @@ class AllDataSelection extends React.PureComponent {
 class AllDataRecordDetails extends React.PureComponent {
 
   getRecordLink(sfHost, recordId) {
-    return "https://" + sfHost + "/" + recordId;
+    return URLBuilder.getRecordUrl(sfHost, recordId);
+  }
+  openRecordLink(e) {
+    e.preventDefault();
+    closePopup();
+    const url = e.target.href;
+    const target = getLinkTarget(e);
+    const recordId = e.target.dataset.recordId;
+    if (target === "_blank") {
+      window.open(url, target);
+    } else {
+      lightningNavigate({navigationType: "recordId", recordId}, url);
+    }
   }
   getRecordTypeLink(sfHost, sobjectName, recordtypeId) {
-    return "https://" + sfHost + "/lightning/setup/ObjectManager/" + sobjectName + "/RecordTypes/" + recordtypeId + "/view";
+    return URLBuilder.getRecordTypeLink(sfHost, sobjectName, recordtypeId);
   }
 
   render() {
@@ -1808,13 +1883,22 @@ class AllDataRecordDetails extends React.PureComponent {
             recordIdDetails.recordName ? h("tr", {},
               h("th", {}, "Name:"),
               h("td", {},
-                h("a", {href: this.getRecordLink(sfHost, selectedValue.recordId), target: linkTarget}, recordIdDetails.recordName)
+                h("a", {
+                  href: this.getRecordLink(sfHost, selectedValue.recordId),
+                  target: linkTarget,
+                  "data-record-id": selectedValue.recordId,
+                  onClick: this.openRecordLink
+                }, recordIdDetails.recordName)
               )
             ) : null,
             recordIdDetails.recordTypeName ? h("tr", {},
               h("th", {}, "RecType:"),
               h("td", {},
-                h("a", {href: this.getRecordTypeLink(sfHost, selectedValue.sobject.name, recordIdDetails.recordTypeId), target: linkTarget}, recordIdDetails.recordTypeName)
+                h("a", {
+                  href: this.getRecordTypeLink(sfHost, selectedValue.sobject.name, recordIdDetails.recordTypeId),
+                  target: linkTarget,
+                  onClick: handleLightningLinkClick
+                }, recordIdDetails.recordTypeName)
               )
             ) : null,
             h("tr", {},
@@ -2079,7 +2163,23 @@ class Autocomplete extends React.PureComponent {
   onResultClick(e, value) {
     let {sfHost} = this.props;
     if (value.isRecent){
-      window.open("https://" + sfHost + "/" + value.recordId, getLinkTarget(e));
+      const linkTarget = getLinkTarget(e);
+      const recordURL = URLBuilder.getRecordUrl(sfHost, value.recordId);
+      closePopup();
+      if (linkTarget == "_blank") {
+        window.open(recordURL, linkTarget);
+      } else {
+        lightningNavigate({navigationType: "recordId", recordId: value.recordId}, recordURL);
+      }
+    } else if(value.isSetupLink) {
+      const url = "https://" + sfHost + value.link;
+      const linkTarget = getLinkTarget(e);
+      closePopup();
+      if (linkTarget == "_blank") {
+        window.open(url, linkTarget);
+      } else {
+        lightningNavigate({navigationType: "url", url}, url);
+      }
     } else {
       this.props.updateInput(value);
       this.setState({showResults: false, selectedIndex: 0});
@@ -2232,7 +2332,9 @@ function sfLocaleKeyToCountryCode(localeKey) {
 }
 
 function getLinkTarget(e) {
-  if (JSON.parse(localStorage.getItem("openLinksInNewTab")) || (e.ctrlKey || e.metaKey)) {
+  const openLinksInNewTabPref = JSON.parse(localStorage.getItem("openLinksInNewTab") || "false");
+  // TODO add check for inDevConsole
+  if (openLinksInNewTabPref || (e.ctrlKey || e.metaKey)) {
     return "_blank";
   } else {
     return "_top";
@@ -2240,3 +2342,69 @@ function getLinkTarget(e) {
 }
 
 window.getRecordId = getRecordId; // for unit tests
+
+function lightningNavigate(details, fallbackURL) {
+  p.postMessage({lightningNavigate: {...details, fallbackURL}}, "*");
+}
+
+function handleLightningLinkClick(e) {
+  e.preventDefault(); // Prevent the default link behavior (href navigation)
+  closePopup();
+  const url = e.currentTarget.href;
+  const target = getLinkTarget(e);
+  if (target === "_blank") {
+    window.open(url, target);
+  } else {
+    lightningNavigate({navigationType: "url", url}, url);
+  }
+}
+
+class URLBuilder {
+  static getRecordUrl(sfHost, recordId) {
+    return `https://${sfHost}/${recordId}`;
+  }
+
+  static getCustomMetadataSetupUrl(sfHost, durableId) {
+    return `https://${sfHost}/lightning/setup/CustomMetadata/page?address=%2F${durableId}%3Fsetupid%3DCustomMetadata`;
+  }
+
+  static getCustomSettingSetupUrl(sfHost, durableId) {
+    return `https://${sfHost}/lightning/setup/CustomSettings/page?address=%2F${durableId}?setupid=CustomSettings`;
+  }
+
+  static getObjectSetupUrl(sfHost, sobjectNameOrDurId) {
+    return `https://${sfHost}/lightning/setup/ObjectManager/${sobjectNameOrDurId}/Details/view`;
+  }
+
+  static getObjectFieldsSetupUrl(sfHost, sobjectNameOrDurId) {
+    return `https://${sfHost}/lightning/setup/ObjectManager/${sobjectNameOrDurId}/FieldsAndRelationships/view`;
+  }
+
+  static getObjectRecordTypesUrl(sfHost, sobjectNameOrDurId) {
+    return `https://${sfHost}/lightning/setup/ObjectManager/${sobjectNameOrDurId}/RecordTypes/view`;
+  }
+
+  static getCustomeMetadataListUrl(sfHost, keyPrefix) {
+    return `https://${sfHost}/lightning/setup/CustomMetadata/page?address=%2F${keyPrefix}`;
+  }
+
+  static getCustomSettingListUrl(sfHost, keyPrefix) {
+    return `https://${sfHost}/lightning/setup/CustomSettings/page?address=%2Fsetup%2Fui%2FlistCustomSettingsData.apexp?id=${keyPrefix}`;
+  }
+
+  static getObjectListUrl(sfHost, sobjectName) {
+    return `https://${sfHost}/lightning/o/${sobjectName}/list`;
+  }
+
+  static getNewObjectUrl(sfHost, newUrl){
+    return `https://${sfHost}${newUrl}`;
+  }
+
+  static getRecordTypeLink(sfHost, sobjectName, recordtypeId) {
+    return `https://${sfHost}/lightning/setup/ObjectManager/${sobjectName}/RecordTypes/${recordtypeId}/view`;
+  }
+
+  static getCompanyInfoUrl(sfHost) {
+    return `https://${sfHost}/lightning/setup/CompanyProfileInfo/home`;
+  }
+}

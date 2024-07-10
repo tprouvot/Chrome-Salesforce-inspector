@@ -2,6 +2,7 @@
 
 ## Version 1.24
 
+- Use Lightning Navigation when opening internal Salesforce links from the popup page (contribution by [Joshua Yarmak](https://github.com/toly11))
 - Fix CustomSetting links in popup [issue 473](https://github.com/tprouvot/Salesforce-Inspector-reloaded/issues/473) (contribution by [Boris Castellani](https://github.com/castellani))
 - Support SOSL [feature 131](https://github.com/tprouvot/Salesforce-Inspector-reloaded/issues/131) and GraphQL queries in Data Export
 - Increase API version to 61 (Summer'24)
